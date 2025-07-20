@@ -23,6 +23,7 @@ class SquareWidget extends StatelessWidget {
   Widget build(BuildContext context) {
     final gameProvider = Provider.of<GameProvider>(context);
     final isSelected = gameProvider.isSquareSelected(row, col);
+    final isLastAIMove = gameProvider.isLastAIMove(row, col);
     final possibleMoves = gameProvider.getPossibleMovesForSquare(row, col);
     final hasPossibleMove = possibleMoves.isNotEmpty;
     final isCapture = hasPossibleMove && possibleMoves.first.captures.isNotEmpty;
@@ -34,12 +35,7 @@ class SquareWidget extends StatelessWidget {
         height: size,
         decoration: BoxDecoration(
           color: _getSquareColor(),
-          border: isSelected
-              ? Border.all(
-            color: GameConstants.selectedSquareColor,
-            width: 3,
-          )
-              : null,
+          border: _getBorder(isSelected, isLastAIMove),
         ),
         child: Stack(
           alignment: Alignment.center,
@@ -73,5 +69,20 @@ class SquareWidget extends StatelessWidget {
     return (row + col) % 2 == 0
         ? GameConstants.lightSquare
         : GameConstants.darkSquare;
+  }
+
+  Border? _getBorder(bool isSelected, bool isLastAIMove) {
+    if (isSelected) {
+      return Border.all(
+        color: GameConstants.selectedSquareColor,
+        width: 3,
+      );
+    } else if (isLastAIMove) {
+      return Border.all(
+        color: GameConstants.primaryColor,
+        width: 2,
+      );
+    }
+    return null;
   }
 }

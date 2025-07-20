@@ -1,4 +1,7 @@
 import 'piece.dart';
+import '../services/ai_player.dart';
+
+enum GameMode { humanVsHuman, humanVsAI }
 
 class Move {
   final int fromRow;
@@ -36,6 +39,10 @@ class GameState {
   PieceColor? winner;
   List<Move> possibleMoves;
   Position? selectedPiece;
+  GameMode gameMode;
+  AIDifficulty aiDifficulty;
+  bool aiThinking;
+  Move? lastAIMove;
 
   GameState({
     this.currentPlayer = PieceColor.light,
@@ -43,5 +50,11 @@ class GameState {
     this.winner,
     this.possibleMoves = const [],
     this.selectedPiece,
+    this.gameMode = GameMode.humanVsHuman,
+    this.aiDifficulty = AIDifficulty.medium,
+    this.aiThinking = false,
+    this.lastAIMove,
   });
+
+  bool get isAITurn => gameMode == GameMode.humanVsAI && currentPlayer == PieceColor.dark;
 }

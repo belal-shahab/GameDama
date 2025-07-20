@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import '../utils/constants.dart';
+import '../models/game_state.dart';
+import '../services/ai_player.dart';
 import 'game_screen.dart';
 
 class HomeScreen extends StatelessWidget {
@@ -46,31 +48,24 @@ class HomeScreen extends StatelessWidget {
 
               SizedBox(height: 80),
 
-              ElevatedButton(
-                onPressed: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(builder: (_) => GameScreen()),
-                  );
-                },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: GameConstants.primaryColor,
-                  padding: EdgeInsets.symmetric(horizontal: 50, vertical: 20),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(30),
-                  ),
-                  elevation: 8,
-                ),
-                child: Text(
-                  'Play Game',
-                  style: TextStyle(
-                    fontSize: 24,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.white,
-                  ),
-                ),
+              _buildGameModeButton(
+                context,
+                'Play vs Human',
+                Icons.people,
+                () => _startGame(context, GameMode.humanVsHuman),
               ).animate()
                   .fadeIn(delay: 1.seconds)
+                  .slideY(begin: 0.3, end: 0),
+
+              SizedBox(height: 20),
+
+              _buildGameModeButton(
+                context,
+                'Play vs AI',
+                Icons.smart_toy,
+                () => _showAIDifficultyDialog(context),
+              ).animate()
+                  .fadeIn(delay: 1.2.seconds)
                   .slideY(begin: 0.3, end: 0),
 
               SizedBox(height: 30),
@@ -87,8 +82,101 @@ class HomeScreen extends StatelessWidget {
                   ),
                 ),
               ).animate()
-                  .fadeIn(delay: 1.2.seconds),
+                  .fadeIn(delay: 1.4.seconds),
             ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildGameModeButton(
+    BuildContext context,
+    String text,
+    IconData icon,
+    VoidCallback onPressed,
+  ) {
+    return ElevatedButton.icon(
+      onPressed: onPressed,
+      icon: Icon(icon, color: Colors.white),
+      label: Text(
+        text,
+        style: TextStyle(
+          fontSize: 20,
+          fontWeight: FontWeight.bold,
+          color: Colors.white,
+        ),
+      ),
+      style: ElevatedButton.styleFrom(
+        backgroundColor: GameConstants.primaryColor,
+        padding: EdgeInsets.symmetric(horizontal: 40, vertical: 16),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(30),
+        ),
+        elevation: 8,
+        minimumSize: Size(250, 60),
+      ),
+    );
+  }
+
+  void _startGame(BuildContext context, GameMode gameMode, [AIDifficulty? difficulty]) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => GameScreen(
+          gameMode: gameMode,
+          aiDifficulty: difficulty ?? AIDifficulty.medium,
+        ),
+      ),
+    ).then((_) {
+      // This runs when returning from game screen
+      print('Returned to main menu');
+    });
+  }
+
+  void _showAIDifficultyDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: GameConstants.backgroundColor,
+        title: Text(
+          'Choose AI Difficulty',
+          style: TextStyle(color: Colors.white),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _buildDifficultyOption(context, 'Easy', AIDifficulty.easy, Colors.green),
+            SizedBox(height: 10),
+            _buildDifficultyOption(context, 'Medium', AIDifficulty.medium, Colors.orange),
+            SizedBox(height: 10),
+            _buildDifficultyOption(context, 'Hard', AIDifficulty.hard, Colors.red),
+            SizedBox(height: 10),
+            _buildDifficultyOption(context, '🤖 ML AI (Learning)', AIDifficulty.mlAI, Colors.purple),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDifficultyOption(BuildContext context, String text, AIDifficulty difficulty, Color color) {
+    return SizedBox(
+      width: double.infinity,
+      child: ElevatedButton(
+        onPressed: () {
+          Navigator.pop(context);
+          _startGame(context, GameMode.humanVsAI, difficulty);
+        },
+        style: ElevatedButton.styleFrom(
+          backgroundColor: color,
+          padding: EdgeInsets.symmetric(vertical: 12),
+        ),
+        child: Text(
+          text,
+          style: TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.bold,
+            color: Colors.white,
           ),
         ),
       ),

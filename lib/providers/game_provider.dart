@@ -4,41 +4,57 @@ import '../models/board.dart';
 import '../models/game_state.dart';
 import '../models/piece.dart';
 import '../utils/game_logic.dart';
+import '../services/ai_player.dart';
 
 class GameProvider extends ChangeNotifier {
   late Board _board;
   late GameState _gameState;
+  late AIPlayer _aiPlayer;
+  List<Move> _gameHistory = [];
 
   Board get board => _board;
   GameState get gameState => _gameState;
+  AIPlayer? get aiPlayer => _aiPlayer;
 
   GameProvider() {
     startNewGame();
   }
 
-  void startNewGame() {
+  void startNewGame({GameMode gameMode = GameMode.humanVsHuman, AIDifficulty aiDifficulty = AIDifficulty.medium}) {
     _board = Board();
-    // Random starting player
+    _gameHistory = []; // Reset game history
     final random = Random();
     final randomPlayer = random.nextBool() ? PieceColor.light : PieceColor.dark;
-    _gameState = GameState(currentPlayer: randomPlayer);
+    _gameState = GameState(
+      currentPlayer: randomPlayer,
+      gameMode: gameMode,
+      aiDifficulty: aiDifficulty,
+    );
+    _aiPlayer = AIPlayer(difficulty: aiDifficulty);
     _updatePossibleMoves();
     notifyListeners();
+
+    // If AI starts first, trigger AI move
+    if (_gameState.isAITurn) {
+      _makeAIMove();
+    }
   }
 
   void selectPiece(int row, int col) {
+    // Don't allow human moves during AI turn
+    if (_gameState.isAITurn || _gameState.aiThinking) return;
+
     Piece? piece = _board.getPiece(row, col);
 
     if (piece != null && piece.color == _gameState.currentPlayer) {
       _gameState.selectedPiece = Position(row, col);
       _updatePossibleMovesForSelectedPiece();
     } else if (_gameState.selectedPiece != null) {
-      // Try to make a move
       Move? validMove = _findValidMove(row, col);
       if (validMove != null) {
         _executeMove(validMove);
+        _checkForAITurn();
       } else {
-        // Deselect if clicking on invalid square
         _gameState.selectedPiece = null;
         _gameState.possibleMoves = [];
       }
@@ -84,6 +100,9 @@ class GameProvider extends ChangeNotifier {
   }
 
   void _executeMove(Move move) {
+    // Add move to history for ML learning
+    _gameHistory.add(move);
+
     // Execute captures
     for (Position capture in move.captures) {
       _board.removePiece(capture.row, capture.col);
@@ -99,6 +118,7 @@ class GameProvider extends ChangeNotifier {
 
     _gameState.selectedPiece = null;
     _gameState.possibleMoves = [];
+    _gameState.lastAIMove = null;
 
     // Check for game over
     if (GameLogic.isGameOver(_board, _gameState.currentPlayer)) {
@@ -106,7 +126,38 @@ class GameProvider extends ChangeNotifier {
       _gameState.winner = _gameState.currentPlayer == PieceColor.light
           ? PieceColor.dark
           : PieceColor.light;
+      
+      // Let ML AI learn from the completed game
+      if (_gameState.gameMode == GameMode.humanVsAI && 
+          _gameState.aiDifficulty == AIDifficulty.mlAI) {
+        _aiPlayer.learnFromGame(_gameHistory, _gameState.winner!, _board);
+      }
     }
+  }
+
+  void _checkForAITurn() {
+    if (_gameState.isAITurn && !_gameState.gameOver) {
+      _makeAIMove();
+    }
+  }
+
+  Future<void> _makeAIMove() async {
+    _gameState.aiThinking = true;
+    notifyListeners();
+
+    try {
+      Move? aiMove = await _aiPlayer.getBestMove(_board, PieceColor.dark);
+      
+      if (aiMove != null && !_gameState.gameOver) {
+        _gameState.lastAIMove = aiMove;
+        _executeMove(aiMove);
+      }
+    } catch (e) {
+      print('AI move error: $e');
+    }
+
+    _gameState.aiThinking = false;
+    notifyListeners();
   }
 
   List<Move> getPossibleMovesForSquare(int row, int col) {
@@ -119,6 +170,12 @@ class GameProvider extends ChangeNotifier {
     return _gameState.selectedPiece != null &&
         _gameState.selectedPiece!.row == row &&
         _gameState.selectedPiece!.col == col;
+  }
+
+  bool isLastAIMove(int row, int col) {
+    return _gameState.lastAIMove != null &&
+        _gameState.lastAIMove!.toRow == row &&
+        _gameState.lastAIMove!.toCol == col;
   }
 
   int getPieceCount(PieceColor color) {
