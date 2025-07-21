@@ -7,24 +7,68 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:provider/provider.dart';
 
-import 'package:game/main.dart';
+import 'package:dama/main.dart';
+import 'package:dama/providers/game_provider.dart';
 
 void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
+  testWidgets('Dama app smoke test', (WidgetTester tester) async {
     // Build our app and trigger a frame.
-    await tester.pumpWidget(MyApp());
+    await tester.pumpWidget(
+      ChangeNotifierProvider(
+        create: (_) => GameProvider(),
+        child: DamaApp(),
+      ),
+    );
 
-    // Verify that our counter starts at 0.
-    expect(find.text('0'), findsOneWidget);
-    expect(find.text('1'), findsNothing);
+    // Verify that our app shows the DAMA title
+    expect(find.text('DAMA'), findsOneWidget);
+    expect(find.text('Classic Checkers Game'), findsOneWidget);
 
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
-    await tester.pump();
+    // Verify that game mode buttons are present
+    expect(find.text('Play vs Human'), findsOneWidget);
+    expect(find.text('Play vs AI'), findsOneWidget);
+    expect(find.text('How to Play'), findsOneWidget);
+  });
 
-    // Verify that our counter has incremented.
-    expect(find.text('0'), findsNothing);
-    expect(find.text('1'), findsOneWidget);
+  testWidgets('AI difficulty dialog test', (WidgetTester tester) async {
+    // Build our app
+    await tester.pumpWidget(
+      ChangeNotifierProvider(
+        create: (_) => GameProvider(),
+        child: DamaApp(),
+      ),
+    );
+
+    // Tap the "Play vs AI" button
+    await tester.tap(find.text('Play vs AI'));
+    await tester.pumpAndSettle();
+
+    // Verify that difficulty dialog appears
+    expect(find.text('Choose AI Difficulty'), findsOneWidget);
+    expect(find.text('🟢 Easy (2 moves ahead)'), findsOneWidget);
+    expect(find.text('🟡 Medium (4 moves ahead)'), findsOneWidget);
+    expect(find.text('🔴 Hard (6 moves ahead)'), findsOneWidget);
+  });
+
+  testWidgets('How to Play dialog test', (WidgetTester tester) async {
+    // Build our app
+    await tester.pumpWidget(
+      ChangeNotifierProvider(
+        create: (_) => GameProvider(),
+        child: DamaApp(),
+      ),
+    );
+
+    // Tap the "How to Play" button
+    await tester.tap(find.text('How to Play'));
+    await tester.pumpAndSettle();
+
+    // Verify that rules dialog appears
+    expect(find.text('How to Play Turkish Dama'), findsOneWidget);
+    expect(find.text('Objective'), findsOneWidget);
+    expect(find.text('Movement'), findsOneWidget);
+    expect(find.text('Capturing'), findsOneWidget);
   });
 }

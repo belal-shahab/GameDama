@@ -15,9 +15,13 @@ class PieceWidget extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Responsive piece sizing
+    final pieceSize = (size * 0.75).clamp(20.0, 40.0);
+    final starSize = (size * 0.4).clamp(12.0, 24.0);
+
     return Container(
-      width: size * 0.8,
-      height: size * 0.8,
+      width: pieceSize,
+      height: pieceSize,
       decoration: BoxDecoration(
         shape: BoxShape.circle,
         color: piece.color == PieceColor.light
@@ -26,8 +30,8 @@ class PieceWidget extends StatelessWidget {
         boxShadow: [
           BoxShadow(
             color: Colors.black.withOpacity(0.3),
-            blurRadius: 4,
-            offset: Offset(2, 2),
+            blurRadius: size * 0.1,
+            offset: Offset(size * 0.05, size * 0.05),
           ),
         ],
         gradient: RadialGradient(
@@ -52,7 +56,7 @@ class PieceWidget extends StatelessWidget {
           color: piece.color == PieceColor.light
               ? Colors.amber.shade800
               : Colors.amber.shade400,
-          size: size * 0.5,
+          size: starSize,
         ).animate()
             .scale(delay: 300.ms, duration: 600.ms)
             .fadeIn(),

@@ -5,7 +5,7 @@ import '../models/game_state.dart';
 import '../utils/game_logic.dart';
 import 'ml_ai_player.dart';
 
-enum AIDifficulty { easy, medium, hard, mlAI }
+enum AIDifficulty { easy, medium, hard, expert, master, mlAI }
 
 class AIPlayer {
   final AIDifficulty difficulty;
@@ -19,21 +19,96 @@ class AIPlayer {
     } else {
       switch (difficulty) {
         case AIDifficulty.easy:
-          _maxDepth = 2;
-          _randomFactor = 0.3; // 30% random moves
+          _maxDepth = 2;        // 2 moves ahead - fast
+          _randomFactor = 0.3;  // 30% random moves
           break;
         case AIDifficulty.medium:
-          _maxDepth = 4;
-          _randomFactor = 0.1; // 10% random moves
+          _maxDepth = 4;        // 4 moves ahead - good balance
+          _randomFactor = 0.1;  // 10% random moves
           break;
         case AIDifficulty.hard:
-          _maxDepth = 6;
-          _randomFactor = 0.0; // No random moves
+          _maxDepth = 6;        // 6 moves ahead - strong but fast
+          _randomFactor = 0.0;  // No random moves
+          break;
+        case AIDifficulty.expert:
+          _maxDepth = 8;        // 8 moves ahead - very strong
+          _randomFactor = 0.0;  // Perfect play
+          break;
+        case AIDifficulty.master:
+          _maxDepth = 10;       // 10 moves ahead - maximum practical depth
+          _randomFactor = 0.0;  // Computer perfection
           break;
         case AIDifficulty.mlAI:
           break;
       }
     }
+  }
+
+  double _evaluateBoard(Board board, PieceColor aiColor) {
+    double score = 0.0;
+
+    // Quick evaluation - count pieces and basic positioning
+    for (int row = 0; row < 8; row++) {
+      for (int col = 0; col < 8; col++) {
+        Piece? piece = board.getPiece(row, col);
+        if (piece != null) {
+          double pieceValue = piece.type == PieceType.king ? 5.0 : 1.0;
+          
+          // Simple position bonus
+          if (piece.type == PieceType.normal) {
+            if (piece.color == PieceColor.dark) {
+              pieceValue += row * 0.1; // Advancement bonus
+            } else {
+              pieceValue += (7 - row) * 0.1;
+            }
+            
+            // SAFETY CHECK: Don't advance pieces that can be easily captured
+            if (_isPieceInDanger(board, row, col, piece.color)) {
+              pieceValue -= 2.0; // Penalty for dangerous positions
+            }
+          }
+          
+          // King safety is CRITICAL
+          if (piece.type == PieceType.king) {
+            if (_isPieceInDanger(board, row, col, piece.color)) {
+              pieceValue -= 10.0; // HUGE penalty for king in danger
+            }
+          }
+          
+          if (piece.color == aiColor) {
+            score += pieceValue;
+          } else {
+            score -= pieceValue;
+          }
+        }
+      }
+    }
+
+    // Quick mobility check - only for shallow depths
+    if (_maxDepth <= 6) {
+      List<Move> aiMoves = GameLogic.getAllPossibleMoves(board, aiColor);
+      score += aiMoves.length * 0.1;
+    }
+
+    return score;
+  }
+
+  // NEW METHOD: Check if piece is in danger
+  bool _isPieceInDanger(Board board, int row, int col, PieceColor pieceColor) {
+    PieceColor enemyColor = pieceColor == PieceColor.dark ? PieceColor.light : PieceColor.dark;
+    
+    // Check if any enemy piece can capture this piece
+    List<Move> enemyMoves = GameLogic.getAllPossibleMoves(board, enemyColor);
+    
+    for (Move move in enemyMoves) {
+      for (Position capture in move.captures) {
+        if (capture.row == row && capture.col == col) {
+          return true; // This piece can be captured!
+        }
+      }
+    }
+    
+    return false;
   }
 
   Future<Move?> getBestMove(Board board, PieceColor aiColor) async {
@@ -42,10 +117,24 @@ class AIPlayer {
       return await _mlPlayer!.getBestMove(board, aiColor);
     }
 
-    // Add delay to simulate thinking
-    await Future.delayed(Duration(milliseconds: 500 + Random().nextInt(1000)));
-
+    // ADAPTIVE DEPTH: Reduce depth in complex positions
+    int adaptiveDepth = _maxDepth;
     List<Move> possibleMoves = GameLogic.getAllPossibleMoves(board, aiColor);
+    
+    // If too many moves available, reduce depth to prevent "analysis paralysis"
+    if (possibleMoves.length > 12) {
+      adaptiveDepth = max(4, _maxDepth - 2);
+    }
+    
+    // If it's early game (many pieces), use less depth
+    int totalPieces = _countTotalPieces(board);
+    if (totalPieces > 20) {
+      adaptiveDepth = max(4, _maxDepth - 1);
+    }
+
+    // Optimized thinking time
+    int thinkingTime = 300 + (adaptiveDepth * 100) + Random().nextInt(200);
+    await Future.delayed(Duration(milliseconds: thinkingTime));
     
     if (possibleMoves.isEmpty) return null;
 
@@ -54,17 +143,107 @@ class AIPlayer {
       return possibleMoves[Random().nextInt(possibleMoves.length)];
     }
 
-    // Use minimax algorithm for intelligent moves
+    // SMART MOVE FILTERING: Prioritize safe moves
+    List<Move> safeMoves = [];
+    List<Move> riskyMoves = [];
+    
+    for (Move move in possibleMoves) {
+      Board tempBoard = _copyBoard(board);
+      _executeMove(tempBoard, move);
+      
+      // Check if the moved piece will be in danger
+      bool willBeInDanger = _isPieceInDanger(tempBoard, move.toRow, move.toCol, aiColor);
+      
+      if (willBeInDanger && move.captures.isEmpty) {
+        riskyMoves.add(move); // Risky non-capture moves
+      } else {
+        safeMoves.add(move); // Safe moves or capture moves
+      }
+    }
+
+    // Prefer safe moves unless forced to make risky ones
+    List<Move> movesToConsider = safeMoves.isNotEmpty ? safeMoves : possibleMoves;
+
+    // Prioritize capture moves to reduce search space
+    List<Move> captureMoves = movesToConsider.where((m) => m.captures.isNotEmpty).toList();
+    if (captureMoves.isNotEmpty) {
+      movesToConsider = captureMoves;
+    }
+
+    // Use iterative deepening for better performance
+    Move? bestMove = movesToConsider.first;
+    double bestScore = double.negativeInfinity;
+    
+    try {
+      for (int depth = 1; depth <= adaptiveDepth; depth++) {
+        for (Move move in movesToConsider) {
+          Board tempBoard = _copyBoard(board);
+          _executeMove(tempBoard, move);
+          
+          double score = _minimax(
+            tempBoard, 
+            depth - 1, 
+            false, 
+            aiColor,
+            double.negativeInfinity,
+            double.infinity
+          );
+
+          if (score > bestScore) {
+            bestScore = score;
+            bestMove = move;
+          }
+        }
+        
+        // Early exit for obvious moves
+        if (depth >= 4 && captureMoves.isNotEmpty && captureMoves.length == 1) {
+          break;
+        }
+      }
+      
+      // Print AI's move analysis
+      String moveDescription = '';
+      if (bestMove != null) {
+        if (bestMove!.captures.isNotEmpty) {
+          moveDescription = 'AI captures ${bestMove!.captures.length} pieces';
+        } else {
+          moveDescription = 'AI makes safe positional move';
+        }
+      }
+      print('🤖 $moveDescription (depth: $adaptiveDepth, eval: ${bestScore.toInt()})');
+      
+    } catch (e) {
+      print('AI search interrupted, using best move found so far');
+    }
+
+    return bestMove;
+  }
+
+  int _countTotalPieces(Board board) {
+    int count = 0;
+    for (int row = 0; row < 8; row++) {
+      for (int col = 0; col < 8; col++) {
+        if (board.getPiece(row, col) != null) count++;
+      }
+    }
+    return count;
+  }
+
+  Move? _findBestMoveAtDepth(Board board, List<Move> moves, PieceColor aiColor, int depth) {
     Move? bestMove;
     double bestScore = double.negativeInfinity;
+    int nodesEvaluated = 0;
+    const int maxNodes = 50000; // Limit to prevent crashes
 
-    for (Move move in possibleMoves) {
+    for (Move move in moves) {
+      if (nodesEvaluated > maxNodes) break; // Safety limit
+      
       Board tempBoard = _copyBoard(board);
       _executeMove(tempBoard, move);
       
       double score = _minimax(
         tempBoard, 
-        _maxDepth - 1, 
+        depth - 1, 
         false, 
         aiColor,
         double.negativeInfinity,
@@ -75,6 +254,8 @@ class AIPlayer {
         bestScore = score;
         bestMove = move;
       }
+      
+      nodesEvaluated++;
     }
 
     return bestMove;
@@ -101,15 +282,23 @@ class AIPlayer {
 
     if (GameLogic.isGameOver(board, currentPlayer)) {
       if (isMaximizing) {
-        return -1000.0 - depth.toDouble(); // AI loses, prefer later losses
+        return -1000.0 - depth.toDouble();
       } else {
-        return 1000.0 + depth.toDouble(); // AI wins, prefer earlier wins
+        return 1000.0 + depth.toDouble();
       }
     }
 
     List<Move> moves = GameLogic.getAllPossibleMoves(board, currentPlayer);
     if (moves.isEmpty) {
       return isMaximizing ? -1000.0 - depth.toDouble() : 1000.0 + depth.toDouble();
+    }
+
+    // Move ordering optimization - prioritize captures
+    moves.sort((a, b) => b.captures.length.compareTo(a.captures.length));
+    
+    // Limit moves in deep search to prevent explosion
+    if (depth > 4 && moves.length > 8) {
+      moves = moves.take(8).toList();
     }
 
     if (isMaximizing) {
@@ -135,64 +324,6 @@ class AIPlayer {
       }
       return minEval;
     }
-  }
-
-  double _evaluateBoard(Board board, PieceColor aiColor) {
-    double score = 0.0;
-
-    for (int row = 0; row < 8; row++) {
-      for (int col = 0; col < 8; col++) {
-        Piece? piece = board.getPiece(row, col);
-        if (piece != null) {
-          double pieceValue = _getPieceValue(piece, row, col);
-          
-          if (piece.color == aiColor) {
-            score += pieceValue;
-          } else {
-            score -= pieceValue;
-          }
-        }
-      }
-    }
-
-    // Add mobility bonus (number of possible moves)
-    List<Move> aiMoves = GameLogic.getAllPossibleMoves(board, aiColor);
-    PieceColor opponentColor = aiColor == PieceColor.dark ? PieceColor.light : PieceColor.dark;
-    List<Move> opponentMoves = GameLogic.getAllPossibleMoves(board, opponentColor);
-    
-    score += aiMoves.length * 0.1;
-    score -= opponentMoves.length * 0.1;
-
-    return score;
-  }
-
-  double _getPieceValue(Piece piece, int row, int col) {
-    double baseValue = piece.type == PieceType.king ? 5.0 : 1.0;
-    
-    // Position bonus for normal pieces
-    if (piece.type == PieceType.normal) {
-      if (piece.color == PieceColor.dark) {
-        // Dark pieces get bonus for advancing (higher row numbers)
-        baseValue += (row * 0.1);
-      } else {
-        // Light pieces get bonus for advancing (lower row numbers)
-        baseValue += ((7 - row) * 0.1);
-      }
-      
-      // Center control bonus
-      if (col >= 2 && col <= 5) {
-        baseValue += 0.1;
-      }
-    }
-    
-    // King positioning bonus
-    if (piece.type == PieceType.king) {
-      // Kings are more valuable in the center
-      int centerDistance = max((row - 3.5).abs(), (col - 3.5).abs()).round();
-      baseValue += (4 - centerDistance) * 0.2;
-    }
-
-    return baseValue;
   }
 
   Board _copyBoard(Board original) {

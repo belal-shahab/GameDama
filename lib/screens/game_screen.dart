@@ -20,6 +20,9 @@ class GameScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final screenSize = MediaQuery.of(context).size;
+    final isSmallScreen = screenSize.width < 400;
+    
     WidgetsBinding.instance.addPostFrameCallback((_) {
       Provider.of<GameProvider>(context, listen: false)
           .startNewGame(gameMode: gameMode, aiDifficulty: aiDifficulty);
@@ -34,17 +37,19 @@ class GameScreen extends StatelessWidget {
           'DAMA',
           style: TextStyle(
             fontWeight: FontWeight.bold,
-            letterSpacing: 4,
+            letterSpacing: isSmallScreen ? 2 : 4,
+            fontSize: isSmallScreen ? 20 : 24,
+            color: Colors.white,
           ),
         ),
         centerTitle: true,
         leading: IconButton(
-          icon: Icon(Icons.home),
+          icon: Icon(Icons.home, color: Colors.white, size: isSmallScreen ? 20 : 24),
           onPressed: () => Navigator.pop(context),
         ),
         actions: [
           IconButton(
-            icon: Icon(Icons.refresh),
+            icon: Icon(Icons.refresh, color: Colors.white, size: isSmallScreen ? 20 : 24),
             onPressed: () {
               Provider.of<GameProvider>(context, listen: false)
                   .startNewGame(gameMode: gameMode, aiDifficulty: aiDifficulty);
@@ -55,22 +60,21 @@ class GameScreen extends StatelessWidget {
       body: SafeArea(
         child: Consumer<GameProvider>(
           builder: (context, gameProvider, _) {
-            return Column(
-              children: [
-                _buildGameInfo(gameProvider),
-                if (aiDifficulty == AIDifficulty.mlAI) 
-                  _buildMLAIStats(gameProvider),
-                SizedBox(height: 20),
-                Expanded(
-                  child: Center(
-                    child: BoardWidget(),
-                  ),
-                ),
-                SizedBox(height: 20),
-                _buildGameStatus(gameProvider),
-                _buildGameControls(context, gameProvider),
-                SizedBox(height: 20),
-              ],
+            return SingleChildScrollView(
+              child: Column(
+                children: [
+                  SizedBox(height: isSmallScreen ? 10 : 20),
+                  _buildGameInfo(gameProvider, isSmallScreen),
+                  _buildGameStats(gameProvider, isSmallScreen),
+                  if (aiDifficulty == AIDifficulty.mlAI) 
+                    _buildMLAIStats(gameProvider, isSmallScreen),
+                  SizedBox(height: isSmallScreen ? 10 : 20),
+                  BoardWidget(),
+                  SizedBox(height: isSmallScreen ? 10 : 20),
+                  _buildGameStatus(gameProvider, isSmallScreen),
+                  SizedBox(height: 20),
+                ],
+              ),
             );
           },
         ),
@@ -78,74 +82,158 @@ class GameScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildGameControls(BuildContext context, GameProvider gameProvider) {
+  Widget _buildGameInfo(GameProvider gameProvider, bool isSmallScreen) {
+    return Column(
+      children: [
+        _buildTurnIndicator(gameProvider, isSmallScreen),
+        if (gameProvider.gameState.aiThinking) ...[
+          SizedBox(height: 8),
+          _buildAIThinkingIndicator(isSmallScreen),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildGameStats(GameProvider gameProvider, bool isSmallScreen) {
+    String currentPlayerName = gameMode == GameMode.humanVsAI 
+        ? (gameProvider.gameState.currentPlayer == PieceColor.light ? 'You' : 'AI')
+        : (gameProvider.gameState.currentPlayer == PieceColor.light ? 'Light' : 'Dark');
+
     return Container(
-      padding: EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+      margin: EdgeInsets.symmetric(horizontal: isSmallScreen ? 15 : 20, vertical: isSmallScreen ? 8 : 10),
+      padding: EdgeInsets.all(isSmallScreen ? 12 : 15),
+      decoration: BoxDecoration(
+        color: GameConstants.primaryColor.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: GameConstants.primaryColor.withOpacity(0.3)),
+      ),
+      child: Column(
         children: [
-          // Return to Main Button
-          ElevatedButton.icon(
-            onPressed: () => Navigator.pop(context),
-            icon: Icon(Icons.home, color: Colors.white),
-            label: Text(
-              'Main Menu',
-              style: TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.bold,
+          // Last Move Score with clear indication
+          if (gameProvider.lastMoveScore > 0)
+            Container(
+              padding: EdgeInsets.symmetric(
+                horizontal: isSmallScreen ? 12 : 15, 
+                vertical: isSmallScreen ? 6 : 8
+              ),
+              decoration: BoxDecoration(
+                color: GameConstants.accentColor.withOpacity(0.8),
+                borderRadius: BorderRadius.circular(15),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.star,
+                    color: Colors.white,
+                    size: isSmallScreen ? 16 : 18,
+                  ),
+                  SizedBox(width: 6),
+                  Text(
+                    '$currentPlayerName scored: +${gameProvider.lastMoveScore.toInt()} points',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: isSmallScreen ? 12 : 14,
+                    ),
+                  ),
+                ],
               ),
             ),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: GameConstants.accentColor,
-              padding: EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(25),
-              ),
-            ),
-          ),
           
-          // New Game Button
-          ElevatedButton.icon(
-            onPressed: () {
-              gameProvider.startNewGame(
-                gameMode: gameMode,
-                aiDifficulty: aiDifficulty,
-              );
-            },
-            icon: Icon(Icons.refresh, color: Colors.white),
-            label: Text(
-              'New Game',
-              style: TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.bold,
+          SizedBox(height: isSmallScreen ? 8 : 12),
+          
+          // Game Statistics with clearer labels
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceAround,
+            children: [
+              _buildPlayerStats(
+                gameMode == GameMode.humanVsAI ? 'You' : 'Light',
+                gameProvider.humanRemainingPieces,
+                gameProvider.humanCapturedPieces,
+                Colors.white,
+                true,
+                isSmallScreen,
               ),
-            ),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: GameConstants.primaryColor,
-              padding: EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(25),
+              Container(
+                width: 1,
+                height: isSmallScreen ? 40 : 50,
+                color: GameConstants.primaryColor.withOpacity(0.5),
               ),
-            ),
+              _buildPlayerStats(
+                gameMode == GameMode.humanVsAI ? 'AI' : 'Dark',
+                gameProvider.aiRemainingPieces,
+                gameProvider.aiCapturedPieces,
+                Colors.grey.shade300,
+                false,
+                isSmallScreen,
+              ),
+            ],
           ),
         ],
       ),
     );
   }
 
-  Widget _buildGameInfo(GameProvider gameProvider) {
+  Widget _buildPlayerStats(String playerName, int remaining, int captured, Color textColor, bool isHumanSide, bool isSmallScreen) {
     return Column(
       children: [
-        _buildTurnIndicator(gameProvider),
-        if (gameProvider.gameState.aiThinking) ...[
-          SizedBox(height: 10),
-          _buildAIThinkingIndicator(),
-        ],
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (!isHumanSide) Icon(Icons.smart_toy, color: textColor, size: isSmallScreen ? 14 : 16),
+            if (isHumanSide) Icon(Icons.person, color: textColor, size: isSmallScreen ? 14 : 16),
+            SizedBox(width: 4),
+            Text(
+              playerName,
+              style: TextStyle(
+                color: textColor,
+                fontWeight: FontWeight.bold,
+                fontSize: isSmallScreen ? 14 : 16,
+              ),
+            ),
+          ],
+        ),
+        SizedBox(height: isSmallScreen ? 6 : 8),
+        
+        // Remaining pieces
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.circle, color: textColor, size: isSmallScreen ? 12 : 14),
+            SizedBox(width: 4),
+            Text(
+              'Remaining: $remaining',
+              style: TextStyle(
+                color: textColor,
+                fontWeight: FontWeight.bold,
+                fontSize: isSmallScreen ? 12 : 14,
+              ),
+            ),
+          ],
+        ),
+        SizedBox(height: 3),
+        
+        // Captured pieces
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.close, color: Colors.red.shade300, size: isSmallScreen ? 12 : 14),
+            SizedBox(width: 4),
+            Text(
+              'Captured: $captured',
+              style: TextStyle(
+                color: textColor.withOpacity(0.8),
+                fontSize: isSmallScreen ? 10 : 12,
+              ),
+            ),
+          ],
+        ),
       ],
     );
   }
 
-  Widget _buildTurnIndicator(GameProvider gameProvider) {
+  Widget _buildTurnIndicator(GameProvider gameProvider, bool isSmallScreen) {
     String playerText;
     if (gameMode == GameMode.humanVsAI) {
       playerText = gameProvider.gameState.currentPlayer == PieceColor.light
@@ -158,12 +246,15 @@ class GameScreen extends StatelessWidget {
     }
 
     return Container(
-      padding: EdgeInsets.symmetric(horizontal: 30, vertical: 15),
+      padding: EdgeInsets.symmetric(
+        horizontal: isSmallScreen ? 20 : 30, 
+        vertical: isSmallScreen ? 10 : 15
+      ),
       decoration: BoxDecoration(
         color: gameProvider.gameState.currentPlayer == PieceColor.light
             ? GameConstants.lightPieceColor
             : GameConstants.darkPieceColor,
-        borderRadius: BorderRadius.circular(25),
+        borderRadius: BorderRadius.circular(20),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withOpacity(0.3),
@@ -182,13 +273,13 @@ class GameScreen extends StatelessWidget {
             color: gameProvider.gameState.currentPlayer == PieceColor.light
                 ? GameConstants.darkPieceColor
                 : GameConstants.lightPieceColor,
-            size: 24,
+            size: isSmallScreen ? 20 : 24,
           ),
-          SizedBox(width: 10),
+          SizedBox(width: 8),
           Text(
             playerText,
             style: TextStyle(
-              fontSize: 18,
+              fontSize: isSmallScreen ? 16 : 18,
               fontWeight: FontWeight.bold,
               color: gameProvider.gameState.currentPlayer == PieceColor.light
                   ? GameConstants.darkPieceColor
@@ -205,30 +296,47 @@ class GameScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildAIThinkingIndicator() {
+  Widget _buildAIThinkingIndicator(bool isSmallScreen) {
+    String thinkingText = 'AI is thinking...';
+    
+    // Show move depth for non-ML AI
+    if (aiDifficulty != AIDifficulty.mlAI) {
+      Map<AIDifficulty, String> depthTexts = {
+        AIDifficulty.easy: 'AI thinking (2 moves ahead)...',
+        AIDifficulty.medium: 'AI calculating (4 moves ahead)...',
+        AIDifficulty.hard: 'AI analyzing (6 moves ahead)...',
+        AIDifficulty.expert: 'Expert AI computing (8 moves ahead)...',
+        AIDifficulty.master: 'Master AI processing (10 moves ahead)...',
+      };
+      thinkingText = depthTexts[aiDifficulty] ?? thinkingText;
+    }
+
     return Container(
-      padding: EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+      padding: EdgeInsets.symmetric(
+        horizontal: isSmallScreen ? 15 : 20, 
+        vertical: isSmallScreen ? 8 : 10
+      ),
       decoration: BoxDecoration(
         color: GameConstants.primaryColor.withOpacity(0.8),
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(15),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           SizedBox(
-            width: 16,
-            height: 16,
+            width: isSmallScreen ? 14 : 16,
+            height: isSmallScreen ? 14 : 16,
             child: CircularProgressIndicator(
               color: Colors.white,
               strokeWidth: 2,
             ),
           ),
-          SizedBox(width: 10),
+          SizedBox(width: 8),
           Text(
-            'AI is thinking...',
+            thinkingText,
             style: TextStyle(
               color: Colors.white,
-              fontSize: 14,
+              fontSize: isSmallScreen ? 12 : 14,
             ),
           ),
         ],
@@ -238,7 +346,7 @@ class GameScreen extends StatelessWidget {
     ).fadeIn(duration: 300.ms);
   }
 
-  Widget _buildGameStatus(GameProvider gameProvider) {
+  Widget _buildGameStatus(GameProvider gameProvider, bool isSmallScreen) {
     if (gameProvider.gameState.gameOver) {
       String winnerText;
       if (gameMode == GameMode.humanVsAI) {
@@ -250,7 +358,8 @@ class GameScreen extends StatelessWidget {
       }
 
       return Container(
-        padding: EdgeInsets.all(20),
+        margin: EdgeInsets.symmetric(horizontal: 20),
+        padding: EdgeInsets.all(isSmallScreen ? 15 : 20),
         decoration: BoxDecoration(
           color: GameConstants.accentColor,
           borderRadius: BorderRadius.circular(15),
@@ -260,16 +369,16 @@ class GameScreen extends StatelessWidget {
             Text(
               'Game Over!',
               style: TextStyle(
-                fontSize: 24,
+                fontSize: isSmallScreen ? 20 : 24,
                 fontWeight: FontWeight.bold,
                 color: Colors.white,
               ),
             ),
-            SizedBox(height: 10),
+            SizedBox(height: 8),
             Text(
               winnerText,
               style: TextStyle(
-                fontSize: 20,
+                fontSize: isSmallScreen ? 16 : 20,
                 color: Colors.white,
               ),
             ),
@@ -283,10 +392,10 @@ class GameScreen extends StatelessWidget {
     return SizedBox.shrink();
   }
 
-  Widget _buildMLAIStats(GameProvider gameProvider) {
+  Widget _buildMLAIStats(GameProvider gameProvider, bool isSmallScreen) {
     return Container(
-      margin: EdgeInsets.symmetric(horizontal: 20),
-      padding: EdgeInsets.all(15),
+      margin: EdgeInsets.symmetric(horizontal: isSmallScreen ? 15 : 20),
+      padding: EdgeInsets.all(isSmallScreen ? 12 : 15),
       decoration: BoxDecoration(
         color: Colors.purple.withOpacity(0.2),
         borderRadius: BorderRadius.circular(10),
@@ -299,16 +408,16 @@ class GameScreen extends StatelessWidget {
             style: TextStyle(
               color: Colors.purple.shade300,
               fontWeight: FontWeight.bold,
-              fontSize: 16,
+              fontSize: isSmallScreen ? 14 : 16,
             ),
           ),
-          SizedBox(height: 8),
+          SizedBox(height: 6),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceAround,
             children: [
-              _buildStatItem('Games', '${gameProvider.aiPlayer?.gamesPlayed ?? 0}'),
-              _buildStatItem('Win Rate', '${((gameProvider.aiPlayer?.winRate ?? 0) * 100).toStringAsFixed(1)}%'),
-              _buildStatItem('Patterns', '${gameProvider.aiPlayer?.patternsLearned ?? 0}'),
+              _buildStatItem('Games', '${gameProvider.aiPlayer?.gamesPlayed ?? 0}', isSmallScreen),
+              _buildStatItem('Win Rate', '${((gameProvider.aiPlayer?.winRate ?? 0) * 100).toStringAsFixed(1)}%', isSmallScreen),
+              _buildStatItem('Patterns', '${gameProvider.aiPlayer?.patternsLearned ?? 0}', isSmallScreen),
             ],
           ),
         ],
@@ -316,7 +425,7 @@ class GameScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildStatItem(String label, String value) {
+  Widget _buildStatItem(String label, String value, bool isSmallScreen) {
     return Column(
       children: [
         Text(
@@ -324,14 +433,14 @@ class GameScreen extends StatelessWidget {
           style: TextStyle(
             color: Colors.white,
             fontWeight: FontWeight.bold,
-            fontSize: 14,
+            fontSize: isSmallScreen ? 12 : 14,
           ),
         ),
         Text(
           label,
           style: TextStyle(
             color: Colors.white70,
-            fontSize: 12,
+            fontSize: isSmallScreen ? 10 : 12,
           ),
         ),
       ],
