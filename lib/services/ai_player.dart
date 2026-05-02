@@ -1,332 +1,402 @@
 import 'dart:math';
+import 'dart:isolate';
 import '../models/board.dart';
 import '../models/piece.dart';
 import '../models/game_state.dart';
 import '../utils/game_logic.dart';
-import 'ml_ai_player.dart';
 
-enum AIDifficulty { easy, medium, hard, expert, master, mlAI }
+class _TTEntry {
+  final double score;
+  final int depth;
+  final int flag; // 0=exact, 1=lowerbound, 2=upperbound
+  _TTEntry(this.score, this.depth, this.flag);
+}
+
+// Serializable board data for isolate
+class _BoardData {
+  final List<List<int?>> squares; // null=empty, encoded: color*10 + type
+  final int aiColorIndex; // 0=light, 1=dark
+
+  _BoardData(this.squares, this.aiColorIndex);
+}
+
+class _MoveResult {
+  final int fromRow, fromCol, toRow, toCol;
+  final List<List<int>> captures; // [row, col] pairs
+
+  _MoveResult(this.fromRow, this.fromCol, this.toRow, this.toCol, this.captures);
+}
 
 class AIPlayer {
-  final AIDifficulty difficulty;
-  late int _maxDepth;
-  late double _randomFactor;
-  MLAIPlayer? _mlPlayer;
-
-  AIPlayer({required this.difficulty}) {
-    if (difficulty == AIDifficulty.mlAI) {
-      _mlPlayer = MLAIPlayer();
-    } else {
-      switch (difficulty) {
-        case AIDifficulty.easy:
-          _maxDepth = 2;        // 2 moves ahead - fast
-          _randomFactor = 0.3;  // 30% random moves
-          break;
-        case AIDifficulty.medium:
-          _maxDepth = 4;        // 4 moves ahead - good balance
-          _randomFactor = 0.1;  // 10% random moves
-          break;
-        case AIDifficulty.hard:
-          _maxDepth = 6;        // 6 moves ahead - strong but fast
-          _randomFactor = 0.0;  // No random moves
-          break;
-        case AIDifficulty.expert:
-          _maxDepth = 8;        // 8 moves ahead - very strong
-          _randomFactor = 0.0;  // Perfect play
-          break;
-        case AIDifficulty.master:
-          _maxDepth = 10;       // 10 moves ahead - maximum practical depth
-          _randomFactor = 0.0;  // Computer perfection
-          break;
-        case AIDifficulty.mlAI:
-          break;
-      }
-    }
-  }
-
-  double _evaluateBoard(Board board, PieceColor aiColor) {
-    double score = 0.0;
-
-    // Quick evaluation - count pieces and basic positioning
-    for (int row = 0; row < 8; row++) {
-      for (int col = 0; col < 8; col++) {
-        Piece? piece = board.getPiece(row, col);
-        if (piece != null) {
-          double pieceValue = piece.type == PieceType.king ? 5.0 : 1.0;
-          
-          // Simple position bonus
-          if (piece.type == PieceType.normal) {
-            if (piece.color == PieceColor.dark) {
-              pieceValue += row * 0.1; // Advancement bonus
-            } else {
-              pieceValue += (7 - row) * 0.1;
-            }
-            
-            // SAFETY CHECK: Don't advance pieces that can be easily captured
-            if (_isPieceInDanger(board, row, col, piece.color)) {
-              pieceValue -= 2.0; // Penalty for dangerous positions
-            }
-          }
-          
-          // King safety is CRITICAL
-          if (piece.type == PieceType.king) {
-            if (_isPieceInDanger(board, row, col, piece.color)) {
-              pieceValue -= 10.0; // HUGE penalty for king in danger
-            }
-          }
-          
-          if (piece.color == aiColor) {
-            score += pieceValue;
-          } else {
-            score -= pieceValue;
-          }
-        }
-      }
-    }
-
-    // Quick mobility check - only for shallow depths
-    if (_maxDepth <= 6) {
-      List<Move> aiMoves = GameLogic.getAllPossibleMoves(board, aiColor);
-      score += aiMoves.length * 0.1;
-    }
-
-    return score;
-  }
-
-  // NEW METHOD: Check if piece is in danger
-  bool _isPieceInDanger(Board board, int row, int col, PieceColor pieceColor) {
-    PieceColor enemyColor = pieceColor == PieceColor.dark ? PieceColor.light : PieceColor.dark;
-    
-    // Check if any enemy piece can capture this piece
-    List<Move> enemyMoves = GameLogic.getAllPossibleMoves(board, enemyColor);
-    
-    for (Move move in enemyMoves) {
-      for (Position capture in move.captures) {
-        if (capture.row == row && capture.col == col) {
-          return true; // This piece can be captured!
-        }
-      }
-    }
-    
-    return false;
-  }
+  static const int _timeLimitMs = 2000;
 
   Future<Move?> getBestMove(Board board, PieceColor aiColor) async {
-    // Use ML AI if selected
-    if (difficulty == AIDifficulty.mlAI && _mlPlayer != null) {
-      return await _mlPlayer!.getBestMove(board, aiColor);
-    }
-
-    // ADAPTIVE DEPTH: Reduce depth in complex positions
-    int adaptiveDepth = _maxDepth;
     List<Move> possibleMoves = GameLogic.getAllPossibleMoves(board, aiColor);
-    
-    // If too many moves available, reduce depth to prevent "analysis paralysis"
-    if (possibleMoves.length > 12) {
-      adaptiveDepth = max(4, _maxDepth - 2);
-    }
-    
-    // If it's early game (many pieces), use less depth
-    int totalPieces = _countTotalPieces(board);
-    if (totalPieces > 20) {
-      adaptiveDepth = max(4, _maxDepth - 1);
-    }
-
-    // Optimized thinking time
-    int thinkingTime = 300 + (adaptiveDepth * 100) + Random().nextInt(200);
-    await Future.delayed(Duration(milliseconds: thinkingTime));
-    
     if (possibleMoves.isEmpty) return null;
+    if (possibleMoves.length == 1) return possibleMoves.first;
 
-    // For easy difficulty, sometimes make random moves
-    if (_randomFactor > 0 && Random().nextDouble() < _randomFactor) {
-      return possibleMoves[Random().nextInt(possibleMoves.length)];
-    }
+    // Serialize board for isolate
+    _BoardData boardData = _serializeBoard(board, aiColor);
 
-    // SMART MOVE FILTERING: Prioritize safe moves
-    List<Move> safeMoves = [];
-    List<Move> riskyMoves = [];
-    
+    // Run AI search in separate isolate — no UI freeze
+    _MoveResult? result = await Isolate.run(() => _searchInIsolate(boardData));
+
+    if (result == null) return possibleMoves.first;
+
+    // Find matching move from possible moves
     for (Move move in possibleMoves) {
-      Board tempBoard = _copyBoard(board);
-      _executeMove(tempBoard, move);
-      
-      // Check if the moved piece will be in danger
-      bool willBeInDanger = _isPieceInDanger(tempBoard, move.toRow, move.toCol, aiColor);
-      
-      if (willBeInDanger && move.captures.isEmpty) {
-        riskyMoves.add(move); // Risky non-capture moves
-      } else {
-        safeMoves.add(move); // Safe moves or capture moves
+      if (move.fromRow == result.fromRow && move.fromCol == result.fromCol &&
+          move.toRow == result.toRow && move.toCol == result.toCol) {
+        return move;
       }
     }
 
-    // Prefer safe moves unless forced to make risky ones
-    List<Move> movesToConsider = safeMoves.isNotEmpty ? safeMoves : possibleMoves;
-
-    // Prioritize capture moves to reduce search space
-    List<Move> captureMoves = movesToConsider.where((m) => m.captures.isNotEmpty).toList();
-    if (captureMoves.isNotEmpty) {
-      movesToConsider = captureMoves;
-    }
-
-    // Use iterative deepening for better performance
-    Move? bestMove = movesToConsider.first;
-    double bestScore = double.negativeInfinity;
-    
-    try {
-      for (int depth = 1; depth <= adaptiveDepth; depth++) {
-        for (Move move in movesToConsider) {
-          Board tempBoard = _copyBoard(board);
-          _executeMove(tempBoard, move);
-          
-          double score = _minimax(
-            tempBoard, 
-            depth - 1, 
-            false, 
-            aiColor,
-            double.negativeInfinity,
-            double.infinity
-          );
-
-          if (score > bestScore) {
-            bestScore = score;
-            bestMove = move;
-          }
-        }
-        
-        // Early exit for obvious moves
-        if (depth >= 4 && captureMoves.isNotEmpty && captureMoves.length == 1) {
-          break;
-        }
-      }
-      
-      // Print AI's move analysis
-      String moveDescription = '';
-      if (bestMove != null) {
-        if (bestMove!.captures.isNotEmpty) {
-          moveDescription = 'AI captures ${bestMove!.captures.length} pieces';
-        } else {
-          moveDescription = 'AI makes safe positional move';
-        }
-      }
-      print('🤖 $moveDescription (depth: $adaptiveDepth, eval: ${bestScore.toInt()})');
-      
-    } catch (e) {
-      print('AI search interrupted, using best move found so far');
-    }
-
-    return bestMove;
+    return possibleMoves.first;
   }
 
-  int _countTotalPieces(Board board) {
-    int count = 0;
+  static _BoardData _serializeBoard(Board board, PieceColor aiColor) {
+    List<List<int?>> squares = List.generate(8, (row) {
+      return List.generate(8, (col) {
+        Piece? piece = board.getPiece(row, col);
+        if (piece == null) return null;
+        int colorVal = piece.color == PieceColor.dark ? 1 : 0;
+        int typeVal = piece.type == PieceType.king ? 1 : 0;
+        return colorVal * 10 + typeVal;
+      });
+    });
+    return _BoardData(squares, aiColor == PieceColor.dark ? 1 : 0);
+  }
+
+  static _MoveResult? _searchInIsolate(_BoardData data) {
+    // Reconstruct board
+    Board board = Board();
     for (int row = 0; row < 8; row++) {
       for (int col = 0; col < 8; col++) {
-        if (board.getPiece(row, col) != null) count++;
+        int? val = data.squares[row][col];
+        if (val != null) {
+          board.setPiece(row, col, Piece(
+            color: val >= 10 ? PieceColor.dark : PieceColor.light,
+            type: val % 10 == 1 ? PieceType.king : PieceType.normal,
+            row: row,
+            col: col,
+          ));
+        } else {
+          board.setPiece(row, col, null);
+        }
       }
     }
-    return count;
-  }
 
-  Move? _findBestMoveAtDepth(Board board, List<Move> moves, PieceColor aiColor, int depth) {
-    Move? bestMove;
+    PieceColor aiColor = data.aiColorIndex == 1 ? PieceColor.dark : PieceColor.light;
+
+    // Run search
+    Map<int, _TTEntry> transpositionTable = {};
+    Stopwatch stopwatch = Stopwatch()..start();
+    bool timeUp = false;
+    Random random = Random();
+
+    List<Move> possibleMoves = GameLogic.getAllPossibleMoves(board, aiColor);
+    if (possibleMoves.isEmpty) return null;
+    if (possibleMoves.length == 1) {
+      Move m = possibleMoves.first;
+      return _MoveResult(m.fromRow, m.fromCol, m.toRow, m.toCol,
+          m.captures.map((c) => [c.row, c.col]).toList());
+    }
+
+    possibleMoves = _orderMovesStatic(possibleMoves);
+
+    Move bestMove = possibleMoves.first;
     double bestScore = double.negativeInfinity;
-    int nodesEvaluated = 0;
-    const int maxNodes = 50000; // Limit to prevent crashes
+    Map<int, double> moveScores = {}; // index -> score
 
-    for (Move move in moves) {
-      if (nodesEvaluated > maxNodes) break; // Safety limit
-      
-      Board tempBoard = _copyBoard(board);
-      _executeMove(tempBoard, move);
-      
-      double score = _minimax(
-        tempBoard, 
-        depth - 1, 
-        false, 
-        aiColor,
-        double.negativeInfinity,
-        double.infinity
-      );
+    for (int depth = 1; depth <= 30; depth++) {
+      if (timeUp) break;
 
-      if (score > bestScore) {
-        bestScore = score;
-        bestMove = move;
+      Map<int, double> currentScores = {};
+      double currentBest = double.negativeInfinity;
+      int? currentBestIdx;
+
+      for (int i = 0; i < possibleMoves.length; i++) {
+        if (stopwatch.elapsedMilliseconds >= _timeLimitMs) {
+          timeUp = true;
+          break;
+        }
+
+        Move move = possibleMoves[i];
+        Board tempBoard = _copyBoardStatic(board);
+        _executeMoveStatic(tempBoard, move);
+
+        double score = _minimaxStatic(
+          tempBoard, depth - 1, false, aiColor,
+          double.negativeInfinity, double.infinity,
+          transpositionTable, stopwatch, _timeLimitMs,
+        );
+
+        if (stopwatch.elapsedMilliseconds >= _timeLimitMs) {
+          timeUp = true;
+          break;
+        }
+
+        currentScores[i] = score;
+
+        if (score > currentBest) {
+          currentBest = score;
+          currentBestIdx = i;
+        }
       }
-      
-      nodesEvaluated++;
+
+      if (!timeUp && currentBestIdx != null) {
+        bestScore = currentBest;
+        bestMove = possibleMoves[currentBestIdx];
+        moveScores = Map.from(currentScores);
+      }
     }
 
-    return bestMove;
-  }
-
-  Future<void> learnFromGame(List<Move> moves, PieceColor winner, Board finalBoard) async {
-    if (difficulty == AIDifficulty.mlAI && _mlPlayer != null) {
-      await _mlPlayer!.learnFromGame(moves, winner, finalBoard);
+    // Near-equal randomness
+    if (moveScores.isNotEmpty) {
+      List<int> topIndices = [];
+      for (var entry in moveScores.entries) {
+        if (entry.value >= bestScore - 1.0) {
+          topIndices.add(entry.key);
+        }
+      }
+      if (topIndices.isNotEmpty) {
+        bestMove = possibleMoves[topIndices[random.nextInt(topIndices.length)]];
+      }
     }
+
+    return _MoveResult(bestMove.fromRow, bestMove.fromCol, bestMove.toRow, bestMove.toCol,
+        bestMove.captures.map((c) => [c.row, c.col]).toList());
   }
 
-  // Getters for ML AI stats
-  int get gamesPlayed => _mlPlayer?.gamesPlayed ?? 0;
-  double get winRate => _mlPlayer?.winRate ?? 0.0;
-  int get patternsLearned => _mlPlayer?.patternsLearned ?? 0;
+  static List<Move> _orderMovesStatic(List<Move> moves) {
+    moves.sort((a, b) {
+      int capDiff = b.captures.length.compareTo(a.captures.length);
+      if (capDiff != 0) return capDiff;
+      int aCenter = _centerScoreStatic(a.toRow, a.toCol);
+      int bCenter = _centerScoreStatic(b.toRow, b.toCol);
+      return bCenter.compareTo(aCenter);
+    });
+    return moves;
+  }
 
-  double _minimax(Board board, int depth, bool isMaximizing, PieceColor aiColor, double alpha, double beta) {
-    PieceColor currentPlayer = isMaximizing ? aiColor : (aiColor == PieceColor.dark ? PieceColor.light : PieceColor.dark);
-    
-    // Base cases
+  static int _centerScoreStatic(int row, int col) {
+    int rowDist = (row - 3).abs() + (row - 4).abs();
+    int colDist = (col - 3).abs() + (col - 4).abs();
+    return 14 - rowDist - colDist;
+  }
+
+  static double _minimaxStatic(Board board, int depth, bool isMaximizing, PieceColor aiColor,
+      double alpha, double beta, Map<int, _TTEntry> tt, Stopwatch sw, int timeLimit) {
+    if (sw.elapsedMilliseconds >= timeLimit) return 0.0;
+
+    PieceColor currentPlayer = isMaximizing
+        ? aiColor
+        : (aiColor == PieceColor.dark ? PieceColor.light : PieceColor.dark);
+
+    int hash = _hashBoardStatic(board, isMaximizing);
+    _TTEntry? cached = tt[hash];
+    if (cached != null && cached.depth >= depth) {
+      if (cached.flag == 0) return cached.score;
+      if (cached.flag == 1 && cached.score >= beta) return cached.score;
+      if (cached.flag == 2 && cached.score <= alpha) return cached.score;
+    }
+
     if (depth == 0) {
-      return _evaluateBoard(board, aiColor);
-    }
-
-    if (GameLogic.isGameOver(board, currentPlayer)) {
-      if (isMaximizing) {
-        return -1000.0 - depth.toDouble();
-      } else {
-        return 1000.0 + depth.toDouble();
-      }
+      double score = _evaluateBoardStatic(board, aiColor);
+      tt[hash] = _TTEntry(score, depth, 0);
+      return score;
     }
 
     List<Move> moves = GameLogic.getAllPossibleMoves(board, currentPlayer);
-    if (moves.isEmpty) {
-      return isMaximizing ? -1000.0 - depth.toDouble() : 1000.0 + depth.toDouble();
+
+    if (moves.isEmpty || GameLogic.isGameOver(board, currentPlayer)) {
+      double score = isMaximizing ? -10000.0 - depth : 10000.0 + depth;
+      tt[hash] = _TTEntry(score, depth, 0);
+      return score;
     }
 
-    // Move ordering optimization - prioritize captures
-    moves.sort((a, b) => b.captures.length.compareTo(a.captures.length));
-    
-    // Limit moves in deep search to prevent explosion
-    if (depth > 4 && moves.length > 8) {
-      moves = moves.take(8).toList();
+    moves = _orderMovesStatic(moves);
+
+    if (depth > 4 && moves.length > 10) {
+      moves = moves.take(10).toList();
     }
+
+    double origAlpha = alpha;
 
     if (isMaximizing) {
       double maxEval = double.negativeInfinity;
       for (Move move in moves) {
-        Board tempBoard = _copyBoard(board);
-        _executeMove(tempBoard, move);
-        double eval = _minimax(tempBoard, depth - 1, false, aiColor, alpha, beta);
+        if (sw.elapsedMilliseconds >= timeLimit) return 0.0;
+        Board tempBoard = _copyBoardStatic(board);
+        _executeMoveStatic(tempBoard, move);
+        double eval = _minimaxStatic(tempBoard, depth - 1, false, aiColor, alpha, beta, tt, sw, timeLimit);
         maxEval = max(maxEval, eval);
         alpha = max(alpha, eval);
-        if (beta <= alpha) break; // Alpha-beta pruning
+        if (beta <= alpha) break;
       }
+      int flag = maxEval <= origAlpha ? 2 : (maxEval >= beta ? 1 : 0);
+      tt[hash] = _TTEntry(maxEval, depth, flag);
       return maxEval;
     } else {
       double minEval = double.infinity;
       for (Move move in moves) {
-        Board tempBoard = _copyBoard(board);
-        _executeMove(tempBoard, move);
-        double eval = _minimax(tempBoard, depth - 1, true, aiColor, alpha, beta);
+        if (sw.elapsedMilliseconds >= timeLimit) return 0.0;
+        Board tempBoard = _copyBoardStatic(board);
+        _executeMoveStatic(tempBoard, move);
+        double eval = _minimaxStatic(tempBoard, depth - 1, true, aiColor, alpha, beta, tt, sw, timeLimit);
         minEval = min(minEval, eval);
         beta = min(beta, eval);
-        if (beta <= alpha) break; // Alpha-beta pruning
+        if (beta <= alpha) break;
       }
+      int flag = minEval >= beta ? 1 : (minEval <= origAlpha ? 2 : 0);
+      tt[hash] = _TTEntry(minEval, depth, flag);
       return minEval;
     }
   }
 
-  Board _copyBoard(Board original) {
+  static double _evaluateBoardStatic(Board board, PieceColor aiColor) {
+    PieceColor enemyColor = aiColor == PieceColor.dark ? PieceColor.light : PieceColor.dark;
+    double score = 0.0;
+    int aiPieces = 0;
+    int enemyPieces = 0;
+
+    for (int row = 0; row < 8; row++) {
+      for (int col = 0; col < 8; col++) {
+        Piece? piece = board.getPiece(row, col);
+        if (piece == null) continue;
+
+        bool isAI = piece.color == aiColor;
+        double pieceScore = 0.0;
+
+        pieceScore += piece.type == PieceType.king ? 30.0 : 10.0;
+
+        if (piece.type == PieceType.normal) {
+          if (piece.color == PieceColor.dark) {
+            pieceScore += row * 0.5;
+          } else {
+            pieceScore += (7 - row) * 0.5;
+          }
+        }
+
+        if (col >= 2 && col <= 5 && row >= 2 && row <= 5) {
+          pieceScore += 1.5;
+        }
+
+        if (piece.type == PieceType.normal) {
+          if ((piece.color == PieceColor.dark && row <= 1) ||
+              (piece.color == PieceColor.light && row >= 6)) {
+            pieceScore += 2.0;
+          }
+        }
+
+        if (_hasFriendlyNeighborStatic(board, row, col, piece.color)) {
+          pieceScore += 1.0;
+        }
+
+        if (piece.type == PieceType.king) {
+          if (row >= 2 && row <= 5 && col >= 2 && col <= 5) {
+            pieceScore += 3.0;
+          }
+        }
+
+        if (_isUnderThreatStatic(board, row, col, piece)) {
+          pieceScore -= piece.type == PieceType.king ? 12.0 : 4.0;
+        }
+
+        if (isAI) {
+          score += pieceScore;
+          aiPieces++;
+        } else {
+          score -= pieceScore;
+          enemyPieces++;
+        }
+      }
+    }
+
+    List<Move> aiMoves = GameLogic.getAllPossibleMoves(board, aiColor);
+    List<Move> enemyMoves = GameLogic.getAllPossibleMoves(board, enemyColor);
+    score += (aiMoves.length - enemyMoves.length) * 0.5;
+
+    if (enemyPieces == 0) score += 10000.0;
+    if (aiPieces == 0) score -= 10000.0;
+
+    return score;
+  }
+
+  static bool _hasFriendlyNeighborStatic(Board board, int row, int col, PieceColor color) {
+    const dirs = [[-1, 0], [1, 0], [0, -1], [0, 1]];
+    for (var dir in dirs) {
+      int nr = row + dir[0];
+      int nc = col + dir[1];
+      if (nr >= 0 && nr < 8 && nc >= 0 && nc < 8) {
+        Piece? neighbor = board.getPiece(nr, nc);
+        if (neighbor != null && neighbor.color == color) return true;
+      }
+    }
+    return false;
+  }
+
+  static bool _isUnderThreatStatic(Board board, int row, int col, Piece piece) {
+    PieceColor enemyColor = piece.color == PieceColor.dark ? PieceColor.light : PieceColor.dark;
+    const dirs = [[-1, 0], [1, 0], [0, -1], [0, 1]];
+
+    for (var dir in dirs) {
+      int attackRow = row - dir[0];
+      int attackCol = col - dir[1];
+      int landRow = row + dir[0];
+      int landCol = col + dir[1];
+
+      if (attackRow < 0 || attackRow >= 8 || attackCol < 0 || attackCol >= 8) continue;
+      if (landRow < 0 || landRow >= 8 || landCol < 0 || landCol >= 8) continue;
+
+      Piece? attacker = board.getPiece(attackRow, attackCol);
+      Piece? landSquare = board.getPiece(landRow, landCol);
+
+      if (attacker != null && attacker.color == enemyColor && landSquare == null) {
+        if (attacker.type == PieceType.normal) {
+          int forward = attacker.color == PieceColor.light ? -1 : 1;
+          int dr = dir[0];
+          if (dr == forward || dir[1] != 0) return true;
+        } else {
+          return true;
+        }
+      }
+
+      if (attacker == null) {
+        int checkR = attackRow - dir[0];
+        int checkC = attackCol - dir[1];
+        while (checkR >= 0 && checkR < 8 && checkC >= 0 && checkC < 8) {
+          Piece? farPiece = board.getPiece(checkR, checkC);
+          if (farPiece != null) {
+            if (farPiece.color == enemyColor && farPiece.type == PieceType.king && landSquare == null) {
+              return true;
+            }
+            break;
+          }
+          checkR -= dir[0];
+          checkC -= dir[1];
+        }
+      }
+    }
+    return false;
+  }
+
+  static int _hashBoardStatic(Board board, bool isMaximizing) {
+    int hash = isMaximizing ? 1 : 0;
+    for (int row = 0; row < 8; row++) {
+      for (int col = 0; col < 8; col++) {
+        Piece? piece = board.getPiece(row, col);
+        if (piece != null) {
+          int pieceVal = (piece.color == PieceColor.dark ? 1 : 2) +
+              (piece.type == PieceType.king ? 4 : 0);
+          hash = hash * 31 + (row * 8 + col) * 7 + pieceVal;
+        }
+      }
+    }
+    return hash;
+  }
+
+  static Board _copyBoardStatic(Board original) {
     Board copy = Board();
     for (int row = 0; row < 8; row++) {
       for (int col = 0; col < 8; col++) {
@@ -346,13 +416,10 @@ class AIPlayer {
     return copy;
   }
 
-  void _executeMove(Board board, Move move) {
-    // Remove captured pieces
+  static void _executeMoveStatic(Board board, Move move) {
     for (Position capture in move.captures) {
       board.removePiece(capture.row, capture.col);
     }
-
-    // Move the piece
     board.movePiece(move.fromRow, move.fromCol, move.toRow, move.toCol);
   }
 }

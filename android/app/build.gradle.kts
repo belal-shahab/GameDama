@@ -8,7 +8,7 @@ plugins {
 android {
     namespace = "com.example.game"
     compileSdk = flutter.compileSdkVersion
-    ndkVersion = flutter.ndkVersion
+    // ndkVersion = flutter.ndkVersion  // disabled — game has no native code, skips ~1GB NDK download
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11

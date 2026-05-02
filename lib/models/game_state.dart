@@ -1,5 +1,4 @@
 import 'piece.dart';
-import '../services/ai_player.dart';
 
 enum GameMode { humanVsHuman, humanVsAI }
 
@@ -40,7 +39,6 @@ class GameState {
   List<Move> possibleMoves;
   Position? selectedPiece;
   GameMode gameMode;
-  AIDifficulty aiDifficulty;
   bool aiThinking;
   Move? lastAIMove;
 
@@ -51,7 +49,6 @@ class GameState {
     this.possibleMoves = const [],
     this.selectedPiece,
     this.gameMode = GameMode.humanVsHuman,
-    this.aiDifficulty = AIDifficulty.medium,
     this.aiThinking = false,
     this.lastAIMove,
   });
