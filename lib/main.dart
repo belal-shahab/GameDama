@@ -25,7 +25,7 @@ class DamaApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Dama - Turkish Checkers',
+      title: 'دامە',
       theme: ThemeData(
         primarySwatch: Colors.blue,
         fontFamily: 'Roboto',
@@ -38,6 +38,10 @@ class DamaApp extends StatelessWidget {
         visualDensity: VisualDensity.adaptivePlatformDensity,
       ),
       debugShowCheckedModeBanner: false,
+      builder: (context, child) => Directionality(
+        textDirection: TextDirection.rtl,
+        child: child!,
+      ),
       home: HomeScreen(),
     );
   }

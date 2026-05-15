@@ -31,7 +31,7 @@ class GameScreen extends StatelessWidget {
         backgroundColor: GameConstants.backgroundColor,
         elevation: 0,
         title: Text(
-          'DAMA',
+          'دامە',
           style: TextStyle(
             fontWeight: FontWeight.bold,
             letterSpacing: isSmallScreen ? 2 : 4,
@@ -45,6 +45,26 @@ class GameScreen extends StatelessWidget {
           onPressed: () => Navigator.pop(context),
         ),
         actions: [
+          Consumer<GameProvider>(
+            builder: (context, gp, _) => IconButton(
+              icon: Icon(
+                Icons.undo,
+                color: gp.canUndo ? Colors.white : Colors.white24,
+                size: isSmallScreen ? 20 : 24,
+              ),
+              onPressed: gp.canUndo ? gp.undo : null,
+            ),
+          ),
+          Consumer<GameProvider>(
+            builder: (context, gp, _) => IconButton(
+              icon: Icon(
+                Icons.redo,
+                color: gp.canRedo ? Colors.white : Colors.white24,
+                size: isSmallScreen ? 20 : 24,
+              ),
+              onPressed: gp.canRedo ? gp.redo : null,
+            ),
+          ),
           IconButton(
             icon: Icon(Icons.refresh, color: Colors.white, size: isSmallScreen ? 20 : 24),
             onPressed: () {
@@ -95,16 +115,16 @@ class GameScreen extends StatelessWidget {
     String playerText;
     if (gameMode == GameMode.humanVsAI) {
       if (gameProvider.gameState.aiThinking) {
-        playerText = 'AI Thinking...';
+        playerText = 'زیرەکی دەستکرد بیر دەکاتەوە...';
       } else {
         playerText = gameProvider.gameState.currentPlayer == PieceColor.light
-            ? 'Your Turn'
-            : 'AI Turn';
+            ? 'نۆبەی تۆ'
+            : 'نۆبەی زیرەکی دەستکرد';
       }
     } else {
       playerText = gameProvider.gameState.currentPlayer == PieceColor.light
-          ? 'Light\'s Turn'
-          : 'Dark\'s Turn';
+          ? 'نۆبەی سپی'
+          : 'نۆبەی ڕەش';
     }
 
     return Container(
@@ -159,10 +179,12 @@ class GameScreen extends StatelessWidget {
     String winnerText;
     if (gameMode == GameMode.humanVsAI) {
       winnerText = gameProvider.gameState.winner == PieceColor.light
-          ? 'You Win!'
-          : 'AI Wins!';
+          ? 'تۆ بردتەوە!'
+          : 'زیرەکی دەستکرد بردیەوە!';
     } else {
-      winnerText = '${gameProvider.gameState.winner == PieceColor.light ? 'Light' : 'Dark'} Wins!';
+      winnerText = gameProvider.gameState.winner == PieceColor.light
+          ? 'سپی بردیەوە!'
+          : 'ڕەش بردیەوە!';
     }
 
     return Container(
@@ -176,7 +198,7 @@ class GameScreen extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           Text(
-            'Game Over!',
+            'یاری تەواو بوو!',
             style: TextStyle(
               fontSize: isSmallScreen ? 18 : 22,
               fontWeight: FontWeight.bold,

@@ -92,7 +92,6 @@ class AIPlayer {
     Map<int, _TTEntry> transpositionTable = {};
     Stopwatch stopwatch = Stopwatch()..start();
     bool timeUp = false;
-    Random random = Random();
 
     List<Move> possibleMoves = GameLogic.getAllPossibleMoves(board, aiColor);
     if (possibleMoves.isEmpty) return null;
@@ -151,19 +150,7 @@ class AIPlayer {
       }
     }
 
-    // Near-equal randomness
-    if (moveScores.isNotEmpty) {
-      List<int> topIndices = [];
-      for (var entry in moveScores.entries) {
-        if (entry.value >= bestScore - 1.0) {
-          topIndices.add(entry.key);
-        }
-      }
-      if (topIndices.isNotEmpty) {
-        bestMove = possibleMoves[topIndices[random.nextInt(topIndices.length)]];
-      }
-    }
-
+    // Deterministic: same board always produces same move (so undo/redo is consistent).
     return _MoveResult(bestMove.fromRow, bestMove.fromCol, bestMove.toRow, bestMove.toCol,
         bestMove.captures.map((c) => [c.row, c.col]).toList());
   }

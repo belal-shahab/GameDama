@@ -22,7 +22,7 @@ class HomeScreen extends StatelessWidget {
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 Text(
-                  'DAMA',
+                  'دامە',
                   style: TextStyle(
                     fontSize: isSmallScreen ? 56 : 72,
                     fontWeight: FontWeight.bold,
@@ -42,7 +42,7 @@ class HomeScreen extends StatelessWidget {
                 SizedBox(height: 15),
 
                 Text(
-                  'Classic Checkers Game',
+                  'یاری دامەی کلاسیک',
                   style: TextStyle(
                     fontSize: isSmallScreen ? 16 : 20,
                     color: Colors.white70,
@@ -55,7 +55,7 @@ class HomeScreen extends StatelessWidget {
 
                 _buildGameModeButton(
                   context,
-                  'Play vs Human',
+                  'یاری لەگەڵ مرۆڤ',
                   Icons.people,
                   () => _startGame(context, GameMode.humanVsHuman),
                   isSmallScreen,
@@ -67,7 +67,7 @@ class HomeScreen extends StatelessWidget {
 
                 _buildGameModeButton(
                   context,
-                  'Play vs AI',
+                  'یاری لەگەڵ زیرەکی دەستکرد',
                   Icons.smart_toy,
                   () => _startGame(context, GameMode.humanVsAI),
                   isSmallScreen,

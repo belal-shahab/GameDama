@@ -8,6 +8,10 @@ class Move {
   final int toRow;
   final int toCol;
   final List<Position> captures;
+  // Intermediate landing squares for multi-capture animation.
+  // Order matches `captures`: path[i] is where piece lands after capturing captures[i].
+  // Empty for non-capture moves; for single capture, has one entry equal to (toRow,toCol).
+  final List<Position> path;
 
   Move({
     required this.fromRow,
@@ -15,6 +19,7 @@ class Move {
     required this.toRow,
     required this.toCol,
     this.captures = const [],
+    this.path = const [],
   });
 }
 

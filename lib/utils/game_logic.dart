@@ -61,7 +61,7 @@ class GameLogic {
 
     // Check captures first - men can capture in forward, left, right directions only
     for (var dir in directions) {
-      List<Move> captures = checkNormalCaptureInDirection(board, piece, piece.row, piece.col, dir, []);
+      List<Move> captures = checkNormalCaptureInDirection(board, piece, piece.row, piece.col, dir, [], [], null);
       captureMoves.addAll(captures);
     }
 
@@ -94,9 +94,16 @@ class GameLogic {
     return moves;
   }
 
-  static List<Move> checkNormalCaptureInDirection(Board board, Piece originalPiece, int currentRow, int currentCol, List<int> direction, List<Position> capturedSoFar) {
+  static List<Move> checkNormalCaptureInDirection(Board board, Piece originalPiece, int currentRow, int currentCol, List<int> direction, List<Position> capturedSoFar, List<Position> pathSoFar, List<int>? lastDirection) {
     List<Move> allCaptures = [];
-    
+
+    // No-reverse rule: if previous capture was in the same line, can't immediately reverse.
+    if (lastDirection != null &&
+        direction[0] == -lastDirection[0] &&
+        direction[1] == -lastDirection[1]) {
+      return allCaptures;
+    }
+
     int enemyRow = currentRow + direction[0];
     int enemyCol = currentCol + direction[1];
     int landRow = currentRow + 2 * direction[0];
@@ -121,6 +128,9 @@ class GameLogic {
       List<Position> newCaptured = List.from(capturedSoFar);
       newCaptured.add(Position(enemyRow, enemyCol));
 
+      List<Position> newPath = List.from(pathSoFar);
+      newPath.add(Position(landRow, landCol));
+
       // Create temporary board for recursive check
       Board tempBoard = Board();
       for (int i = 0; i < 8; i++) {
@@ -134,8 +144,8 @@ class GameLogic {
         tempBoard.removePiece(pos.row, pos.col);
       }
 
-      // Check for additional captures from landing position
-      List<Move> furtherCaptures = checkNormalCaptureChain(tempBoard, originalPiece, landRow, landCol, newCaptured);
+      // Check for additional captures from landing position (carry direction for no-reverse rule)
+      List<Move> furtherCaptures = checkNormalCaptureChain(tempBoard, originalPiece, landRow, landCol, newCaptured, newPath, direction);
 
       if (furtherCaptures.isEmpty) {
         // No more captures, this is a complete capture chain
@@ -145,6 +155,7 @@ class GameLogic {
           toRow: landRow,
           toCol: landCol,
           captures: newCaptured,
+          path: newPath,
         ));
       } else {
         // Add all further capture chains
@@ -155,7 +166,7 @@ class GameLogic {
     return allCaptures;
   }
 
-  static List<Move> checkNormalCaptureChain(Board board, Piece originalPiece, int currentRow, int currentCol, List<Position> capturedSoFar) {
+  static List<Move> checkNormalCaptureChain(Board board, Piece originalPiece, int currentRow, int currentCol, List<Position> capturedSoFar, List<Position> pathSoFar, List<int>? lastDirection) {
     List<Move> allCaptures = [];
 
     // Turkish Dama - Men can capture in forward, left, right directions only
@@ -167,7 +178,7 @@ class GameLogic {
     ];
 
     for (var dir in directions) {
-      List<Move> captures = checkNormalCaptureInDirection(board, originalPiece, currentRow, currentCol, dir, capturedSoFar);
+      List<Move> captures = checkNormalCaptureInDirection(board, originalPiece, currentRow, currentCol, dir, capturedSoFar, pathSoFar, lastDirection);
       allCaptures.addAll(captures);
     }
 
@@ -187,7 +198,7 @@ class GameLogic {
     ];
 
     // Check captures with chain
-    List<Move> captures = checkKingCaptureChain(board, piece, piece.row, piece.col, []);
+    List<Move> captures = checkKingCaptureChain(board, piece, piece.row, piece.col, [], [], null);
     captureMoves.addAll(captures);
 
     if (captureMoves.isNotEmpty) {
@@ -228,7 +239,7 @@ class GameLogic {
     return moves;
   }
 
-  static List<Move> checkKingCaptureChain(Board board, Piece originalPiece, int currentRow, int currentCol, List<Position> capturedSoFar) {
+  static List<Move> checkKingCaptureChain(Board board, Piece originalPiece, int currentRow, int currentCol, List<Position> capturedSoFar, List<Position> pathSoFar, List<int>? lastDirection) {
     List<Move> allCaptures = [];
 
     List<List<int>> directions = [
@@ -239,6 +250,13 @@ class GameLogic {
     ];
 
     for (var dir in directions) {
+      // No-reverse rule: a king cannot immediately reverse direction on the same line.
+      if (lastDirection != null &&
+          dir[0] == -lastDirection[0] &&
+          dir[1] == -lastDirection[1]) {
+        continue;
+      }
+
       int steps = 1;
       Piece? enemyFound = null;
       int enemyRow = -1;
@@ -279,6 +297,9 @@ class GameLogic {
               List<Position> newCaptured = List.from(capturedSoFar);
               newCaptured.add(Position(enemyRow, enemyCol));
 
+              List<Position> newPath = List.from(pathSoFar);
+              newPath.add(Position(landRow, landCol));
+
               // Create temporary board
               Board tempBoard = Board();
               for (int i = 0; i < 8; i++) {
@@ -292,8 +313,8 @@ class GameLogic {
                 tempBoard.removePiece(pos.row, pos.col);
               }
 
-              // Check for additional captures
-              List<Move> furtherCaptures = checkKingCaptureChain(tempBoard, originalPiece, landRow, landCol, newCaptured);
+              // Check for additional captures (carry direction for no-reverse rule)
+              List<Move> furtherCaptures = checkKingCaptureChain(tempBoard, originalPiece, landRow, landCol, newCaptured, newPath, dir);
 
               if (furtherCaptures.isEmpty) {
                 allCaptures.add(Move(
@@ -302,6 +323,7 @@ class GameLogic {
                   toRow: landRow,
                   toCol: landCol,
                   captures: newCaptured,
+                  path: newPath,
                 ));
               } else {
                 allCaptures.addAll(furtherCaptures);
